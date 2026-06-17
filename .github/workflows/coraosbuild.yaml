@@ -1,14 +1,10 @@
 name: Build CoraOS Kernels
 
-
-
 on:
   workflow_dispatch:
 
-
 permissions:
   contents: write
-
 
 jobs:
   build:
@@ -32,11 +28,9 @@ jobs:
             cpu_target: generic_v4
             package_name: linux-coraos-x86-64-v4
 
-
     steps:
       - name: checkout repo
         uses: actions/checkout@v4
-
 
       - name: install dependencies
         run: |
@@ -45,19 +39,16 @@ jobs:
             base-devel git bc kmod libelf pahole cpio perl tar xz zstd python \
             clang llvm lld fakeroot sudo pacman-contrib gnupg archlinux-keyring
 
-
       - name: init keys
         run: |
           rm -rf /etc/pacman.d/gnupg
           pacman-key --init
           pacman-key --populate archlinux
 
-
       - name: create builder user
         run: |
           useradd -m builder
           echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
-
 
       - name: pull latest CachyOS kernel source
         run: |
@@ -65,31 +56,27 @@ jobs:
           cp -r upstream/linux-cachyos/* .
           rm -rf upstream
 
-
       - name: tweaks
         run: |
-          sed -i 's/\(_cachy_config:=\)[^"]*/\1yes/' PKGBUILD
-          sed -i 's/\(_cpusched:=\)[^"]*/\1bore/' PKGBUILD
-          sed -i 's/\(_cc_harder:=\)[^"]*/\1yes/' PKGBUILD
-          sed -i 's/\(_tcp_bbr3:=\)[^"]*/\1yes/' PKGBUILD
-          sed -i 's/\(_use_kcfi:=\)[^"]*/\1yes/' PKGBUILD
-          sed -i 's/\(_use_llvm_lto:=\)[^"]*/\1thin/' PKGBUILD
-          sed -i 's/\(_hugepage:=\)[^"]*/\1madvise/' PKGBUILD
-          sed -i "s/\(_processor_opt:=\)[^\"]*/\1${{ matrix.cpu_target }}/" PKGBUILD
+          sed -i 's/^_cachy_config=.*/_cachy_config=yes/' PKGBUILD
+          sed -i 's/^_cpusched=.*/_cpusched=bore/' PKGBUILD
+          sed -i 's/^_cc_harder=.*/_cc_harder=yes/' PKGBUILD
+          sed -i 's/^_tcp_bbr3=.*/_tcp_bbr3=yes/' PKGBUILD
+          sed -i 's/^_use_kcfi=.*/_use_kcfi=yes/' PKGBUILD
+          sed -i 's/^_use_llvm_lto=.*/_use_llvm_lto=thin/' PKGBUILD
+          sed -i 's/^_hugepage=.*/_hugepage=madvise/' PKGBUILD
+          sed -i "s/^_processor_opt=.*/_processor_opt=${{ matrix.cpu_target }}/" PKGBUILD
           sed -i "s/^pkgbase=.*/pkgbase=${{ matrix.package_name }}/" PKGBUILD
-    
+
       - name: set perms
         run: |
           chown -R builder:builder .
-
-
 
       - name: build kernel
         run: |
           su builder -c "
             MAKEFLAGS='-j$(nproc)' makepkg -s --noconfirm --skippgpcheck --skipchecksums
           "
-
 
       - name: upload artifacts
         uses: actions/upload-artifact@v4
@@ -98,13 +85,11 @@ jobs:
           path: "*.pkg.tar.zst*"
           if-no-files-found: error
 
-
   release:
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
 
     steps:
       - uses: actions/download-artifact@v4
@@ -119,13 +104,11 @@ jobs:
           cd release
           sha256sum *.pkg.tar.zst* > checksums.txt 2>/dev/null || true
 
-
-
-      - name: create  release
+      - name: create release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: coraos-${{ github.run_number }}
           name: CoraOS Kernel Build v${{ github.run_number }}
           files: release/*
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
