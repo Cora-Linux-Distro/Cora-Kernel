@@ -77,22 +77,17 @@ jobs:
           sed -i 's/\(_hugepage:=\)[^"]*/\1madvise/' PKGBUILD
           sed -i "s/\(_processor_opt:=\)[^\"]*/\1${{ matrix.cpu_target }}/" PKGBUILD
           sed -i "s/^pkgbase=.*/pkgbase=${{ matrix.package_name }}/" PKGBUILD
-
-
-      - name: update checksums
-        run: |
-          su builder -c "updpkgsums"
-
-
+    
       - name: set perms
         run: |
           chown -R builder:builder .
 
 
+
       - name: build kernel
         run: |
           su builder -c "
-            MAKEFLAGS='-j$(nproc)' makepkg -s --noconfirm --skippgpcheck
+            MAKEFLAGS='-j$(nproc)' makepkg -s --noconfirm --skippgpcheck --skipchecksums
           "
 
 
