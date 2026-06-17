@@ -1,0 +1,136 @@
+name: Build CoraOS Kernels
+
+
+
+on:
+  workflow_dispatch:
+
+
+permissions:
+  contents: write
+
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    container:
+      image: archlinux:latest
+      options: --security-opt seccomp=unconfined
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kernel_type: generic
+            cpu_target: generic
+            package_name: linux-coraos
+          - kernel_type: x86-64-v3
+            cpu_target: generic_v3
+            package_name: linux-coraos-x86-64-v3
+          - kernel_type: x86-64-v4
+            cpu_target: generic_v4
+            package_name: linux-coraos-x86-64-v4
+
+
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v4
+
+
+      - name: install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm \
+            base-devel git bc kmod libelf pahole cpio perl tar xz zstd python \
+            clang llvm lld fakeroot sudo pacman-contrib gnupg archlinux-keyring
+
+
+      - name: init keys
+        run: |
+          rm -rf /etc/pacman.d/gnupg
+          pacman-key --init
+          pacman-key --populate archlinux
+
+
+      - name: create builder user
+        run: |
+          useradd -m builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
+
+
+      - name: pull latest CachyOS kernel source
+        run: |
+          git clone --depth=1 https://github.com/CachyOS/linux-cachyos.git upstream
+          cp -r upstream/linux-cachyos/* .
+          rm -rf upstream
+
+
+      - name: tweaks
+        run: |
+          sed -i 's/\(_cachy_config:=\)[^"]*/\1yes/' PKGBUILD
+          sed -i 's/\(_cpusched:=\)[^"]*/\1bore/' PKGBUILD
+          sed -i 's/\(_cc_harder:=\)[^"]*/\1yes/' PKGBUILD
+          sed -i 's/\(_tcp_bbr3:=\)[^"]*/\1yes/' PKGBUILD
+          sed -i 's/\(_use_kcfi:=\)[^"]*/\1yes/' PKGBUILD
+          sed -i 's/\(_use_llvm_lto:=\)[^"]*/\1thin/' PKGBUILD
+          sed -i 's/\(_hugepage:=\)[^"]*/\1madvise/' PKGBUILD
+          sed -i "s/\(_processor_opt:=\)[^\"]*/\1${{ matrix.cpu_target }}/" PKGBUILD
+          sed -i "s/^pkgbase=.*/pkgbase=${{ matrix.package_name }}/" PKGBUILD
+
+
+      - name: update checksums
+        run: |
+          updpkgsums
+
+
+      - name: set perms
+        run: |
+          chown -R builder:builder .
+
+
+      - name: build kernel
+        run: |
+          su builder -c "
+            MAKEFLAGS='-j$(nproc)' makepkg -s --noconfirm --skippgpcheck
+          "
+
+
+      - name: upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.kernel_type }}
+          path: "*.pkg.tar.zst*"
+          if-no-files-found: error
+
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: create release folder
+        run: |
+          mkdir -p release
+          cp artifacts/*.pkg.tar.zst* release/ 2>/dev/null || true
+          cd release
+          sha256sum *.pkg.tar.zst* > checksums.txt 2>/dev/null || true
+
+
+
+      - name: create  release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: coraos-${{ github.run_number }}
+          name: CoraOS Kernel Build v${{ github.run_number }}
+          files: release/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
