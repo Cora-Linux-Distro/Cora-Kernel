@@ -81,7 +81,7 @@ jobs:
 
       - name: update checksums
         run: |
-          updpkgsums
+          su builder -c "updpkgsums"
 
 
       - name: set perms
