@@ -21,6 +21,9 @@ jobs:
           - kernel_type: generic
             cpu_target: generic
             package_name: linux-coraos
+          - kernel_type: x86-64-v2
+            cpu_target: generic_v2
+            package_name: linux-coraos-x86-64-v2
           - kernel_type: x86-64-v3
             cpu_target: generic_v3
             package_name: linux-coraos-x86-64-v3
@@ -83,7 +86,7 @@ jobs:
         with:
           name: ${{ matrix.kernel_type }}
           path: "*.pkg.tar.zst*"
-          if-no-files-found: error
+          if-no-files-found: errori di
 
   release:
     needs: build
