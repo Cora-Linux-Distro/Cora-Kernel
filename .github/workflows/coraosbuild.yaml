@@ -86,7 +86,7 @@ jobs:
         with:
           name: ${{ matrix.kernel_type }}
           path: "*.pkg.tar.zst*"
-          if-no-files-found: errori di
+          if-no-files-found: error
 
   release:
     needs: build
