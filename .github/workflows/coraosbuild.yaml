@@ -35,6 +35,10 @@ jobs:
       - name: checkout repo
         uses: actions/checkout@v4
 
+      - name: free up storage
+        run: |
+          rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /usr/lib/gcc/x86_64-linux-gnu/9 /usr/local/lib/android 2>/dev/null
+          df -h
       - name: install dependencies
         run: |
           pacman -Syu --noconfirm
