@@ -39,6 +39,7 @@ jobs:
         run: |
           rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /usr/lib/gcc/x86_64-linux-gnu/9 /usr/local/lib/android 2>/dev/null
           df -h
+
       - name: install dependencies
         run: |
           pacman -Syu --noconfirm
@@ -79,7 +80,6 @@ jobs:
         run: |
           chown -R builder:builder .
 
-
       - name: import GPG key
         run: |
           echo "${{ secrets.GPG_PRIVATE_KEY }}" | su builder -c "gpg --batch --import"
@@ -97,19 +97,19 @@ jobs:
           path: "*.pkg.tar.zst*"
           if-no-files-found: error
 
-        
       - name: upload to repo
         env:
           REPO_KEY: ${{ secrets.REPO_ACCESS_KEY }}
           REPO_SECRET: ${{ secrets.REPO_SECRET_ACCESS_KEY }}
           ACCOUNT: ${{ secrets.ACCOUNT_ID }}
         run: |
-          rclone config create coraosrepo s3 provider=Cloudflare access_key_id=$REPO_KEY secret_access_key=$REPO_SECRET endpoint=https://$ACCOUNT.r2.cloudflarestorage.com
-          
+          rclone config create coraosrepo s3 provider=Cloudflare access_key_id=$REPO_KEY secret_access_key=$REPO_SECRET endpoint=https://$ACCOUNT.r2.cloudflarestorage.com no_check_bucket=true
+
           mkdir -p CoraOS_Repo
           cp *.pkg.tar.zst* CoraOS_Repo/
-          
+
           rclone copy CoraOS_Repo/ coraosrepo:coraos-repo/x86_64/ --no-check-dest
+
   release:
     needs: build
     runs-on: ubuntu-latest
@@ -122,6 +122,10 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: get build timestamp
+        id: build_time
+        run: echo "stamp=$(date +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+
       - name: create release folder
         run: |
           mkdir -p release
@@ -132,7 +136,7 @@ jobs:
       - name: create release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: coraos-${{ github.run_number }}-$(date +%Y%m%d-%H%M%S)
+          tag_name: coraos-${{ github.run_number }}-${{ steps.build_time.outputs.stamp }}
           name: CoraOS Kernel Build v${{ github.run_number }}
           files: release/*
         env:
