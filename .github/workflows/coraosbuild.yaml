@@ -97,14 +97,19 @@ jobs:
           path: "*.pkg.tar.zst*"
           if-no-files-found: error
 
+        
       - name: upload to repo
         env:
           REPO_KEY: ${{ secrets.REPO_ACCESS_KEY }}
           REPO_SECRET: ${{ secrets.REPO_SECRET_ACCESS_KEY }}
           ACCOUNT: ${{ secrets.ACCOUNT_ID }}
         run: |
-          rclone config create coraosr2 s3 provider=Cloudflare access_key_id=$REPO_KEY secret_access_key=$REPO_SECRET endpoint=https://$ACCOUNT.r2.cloudflarestorage.com
-          rclone copy *.pkg.tar.zst* coraosr2:coraos-repo/x86_64/ --no-check-dest
+          rclone config create coraosrepo s3 provider=Cloudflare access_key_id=$REPO_KEY secret_access_key=$REPO_SECRET endpoint=https://$ACCOUNT.r2.cloudflarestorage.com
+          
+          mkdir -p CoraOS_Repo
+          cp *.pkg.tar.zst* CoraOS_Repo/
+          
+          rclone copy CoraOS_Repo/ coraosrepo:coraos-repo/x86_64/ --no-check-dest
   release:
     needs: build
     runs-on: ubuntu-latest
