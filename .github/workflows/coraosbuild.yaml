@@ -44,7 +44,7 @@ jobs:
           pacman -Syu --noconfirm
           pacman -S --noconfirm \
             base-devel git bc kmod libelf pahole cpio perl tar xz zstd python \
-            clang llvm lld fakeroot sudo pacman-contrib gnupg archlinux-keyring
+            clang llvm lld fakeroot sudo pacman-contrib gnupg archlinux-keyring rclone
 
       - name: init keys
         run: |
@@ -79,10 +79,15 @@ jobs:
         run: |
           chown -R builder:builder .
 
+
+      - name: import GPG key
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | su builder -c "gpg --batch --import"
+
       - name: build kernel
         run: |
           su builder -c "
-            MAKEFLAGS='-j$(nproc)' makepkg -s --noconfirm --skippgpcheck --skipchecksums
+            MAKEFLAGS='-j$(nproc)' makepkg -s --noconfirm --skippgpcheck --skipchecksums --sign
           "
 
       - name: upload artifacts
@@ -92,6 +97,14 @@ jobs:
           path: "*.pkg.tar.zst*"
           if-no-files-found: error
 
+      - name: upload to repo
+        env:
+          REPO_KEY: ${{ secrets.REPO_ACCESS_KEY }}
+          REPO_SECRET: ${{ secrets.REPO_SECRET_ACCESS_KEY }}
+          ACCOUNT: ${{ secrets.ACCOUNT_ID }}
+        run: |
+          rclone config create coraosr2 s3 provider=Cloudflare access_key_id=$REPO_KEY secret_access_key=$REPO_SECRET endpoint=https://$ACCOUNT.r2.cloudflarestorage.com
+          rclone copy *.pkg.tar.zst* coraosr2:coraos-repo/x86_64/ --no-check-dest
   release:
     needs: build
     runs-on: ubuntu-latest
@@ -114,7 +127,7 @@ jobs:
       - name: create release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: coraos-${{ github.run_number }}
+          tag_name: coraos-${{ github.run_number }}-$(date +%Y%m%d-%H%M%S)
           name: CoraOS Kernel Build v${{ github.run_number }}
           files: release/*
         env:
