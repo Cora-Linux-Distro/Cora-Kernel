@@ -19,16 +19,16 @@ jobs:
       matrix:
         include:
           - kernel_type: generic
-            cpu_target: generic
+            cpu_target: GENERIC
             package_name: linux-coraos
           - kernel_type: x86-64-v2
-            cpu_target: generic_v2
+            cpu_target: GENERIC_V2
             package_name: linux-coraos-x86-64-v2
           - kernel_type: x86-64-v3
-            cpu_target: generic_v3
+            cpu_target: GENERIC_V3
             package_name: linux-coraos-x86-64-v3
           - kernel_type: x86-64-v4
-            cpu_target: generic_v4
+            cpu_target: GENERIC_V4
             package_name: linux-coraos-x86-64-v4
 
     steps:
@@ -64,17 +64,10 @@ jobs:
           cp -r upstream/linux-cachyos/* .
           rm -rf upstream
 
-      - name: tweaks
+      - name: setting Name,Version and Description
         run: |
-          sed -i 's/^_cachy_config=.*/_cachy_config=yes/' PKGBUILD
-          sed -i 's/^_cpusched=.*/_cpusched=bore/' PKGBUILD
-          sed -i 's/^_cc_harder=.*/_cc_harder=yes/' PKGBUILD
-          sed -i 's/^_tcp_bbr3=.*/_tcp_bbr3=yes/' PKGBUILD
-          sed -i 's/^_use_kcfi=.*/_use_kcfi=yes/' PKGBUILD
-          sed -i 's/^_use_llvm_lto=.*/_use_llvm_lto=thin/' PKGBUILD
-          sed -i 's/^_hugepage=.*/_hugepage=madvise/' PKGBUILD
-          sed -i "s/^_processor_opt=.*/_processor_opt=${{ matrix.cpu_target }}/" PKGBUILD
           sed -i "s/^pkgbase=.*/pkgbase=${{ matrix.package_name }}/" PKGBUILD
+          sed -i 's/^pkgdesc=.*/pkgdesc=CoraOS kernel. Applied patches to the CachyOS kernel/' PKGBUILD
 
       - name: set perms
         run: |
@@ -84,11 +77,21 @@ jobs:
         run: |
           echo "${{ secrets.GPG_PRIVATE_KEY }}" | su builder -c "gpg --batch --import"
 
-      - name: build kernel
+      - name: build kernel & apply Tweaks
         run: |
-          su builder -c "
-            MAKEFLAGS='-j$(nproc)' makepkg -s --noconfirm --skippgpcheck --skipchecksums --sign
-          "
+          su builder -c '
+            # Optimizations
+            export _cachy_config="yes"
+            export _cpusched="bore"
+            export _cc_harder="yes"
+            export _tcp_bbr3="yes"
+            export _use_kcfi="yes"
+            export _use_llvm_lto="thin"
+            export _hugepage="madvise"
+            export _processor_opt="${{ matrix.cpu_target }}"
+
+            MAKEFLAGS="-j$(nproc)" makepkg -s --noconfirm --skippgpcheck --skipchecksums --sign
+          '
 
       - name: upload artifacts
         uses: actions/upload-artifact@v4

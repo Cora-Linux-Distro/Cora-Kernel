@@ -9,7 +9,7 @@
 # Set these variables to ANYTHING that is not null or choose proper variable to enable them
 
 ### Selecting CachyOS config
-: "${_cachy_config:=yes}" 
+: "${_cachy_config:=yes}"
 
 ### Selecting the CPU scheduler
 # ATTENTION - only one of the following values can be selected:
@@ -50,7 +50,6 @@
 
 ### Enable KBUILD_CFLAGS -O3
 : "${_cc_harder:=yes}"
-
 
 ### Set performance governor as default
 : "${_per_gov:=no}"
