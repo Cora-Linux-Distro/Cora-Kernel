@@ -64,7 +64,7 @@ jobs:
           cp -r upstream/linux-cachyos/* .
           rm -rf upstream
 
-      - name: setting Name,Version and Description
+      - name: setting Name, Version and Description
         run: |
           sed -i "s/^pkgbase=.*/pkgbase=${{ matrix.package_name }}/" PKGBUILD
           sed -i 's/^pkgdesc=.*/pkgdesc=CoraOS kernel. Applied patches to the CachyOS kernel/' PKGBUILD
@@ -74,24 +74,26 @@ jobs:
           chown -R builder:builder .
 
       - name: import GPG key
+        env:
+          GPG_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        shell: su builder -s /bin/bash {0}
         run: |
-          echo "${{ secrets.GPG_PRIVATE_KEY }}" | su builder -c "gpg --batch --import"
+          echo "$GPG_KEY" | gpg --batch --import
 
       - name: build kernel & apply Tweaks
+        shell: su builder -s /bin/bash {0}
         run: |
-          su builder -c '
-            # Optimizations
-            export _cachy_config="yes"
-            export _cpusched="bore"
-            export _cc_harder="yes"
-            export _tcp_bbr3="yes"
-            export _use_kcfi="yes"
-            export _use_llvm_lto="thin"
-            export _hugepage="madvise"
-            export _processor_opt="${{ matrix.cpu_target }}"
+          # Optimizations
+          export _cachy_config="yes"
+          export _cpusched="bore"
+          export _cc_harder="yes"
+          export _tcp_bbr3="yes"
+          export _use_kcfi="yes"
+          export _use_llvm_lto="thin"
+          export _hugepage="madvise"
+          export _processor_opt="${{ matrix.cpu_target }}"
 
-            MAKEFLAGS="-j$(nproc)" makepkg -s --noconfirm --skippgpcheck --skipchecksums --sign
-          '
+          MAKEFLAGS="-j$(nproc)" makepkg -s --noconfirm --skipchecksums --sign
 
       - name: upload artifacts
         uses: actions/upload-artifact@v4
@@ -106,7 +108,12 @@ jobs:
           REPO_SECRET: ${{ secrets.REPO_SECRET_ACCESS_KEY }}
           ACCOUNT: ${{ secrets.ACCOUNT_ID }}
         run: |
-          rclone config create coraosrepo s3 provider=Cloudflare access_key_id=$REPO_KEY secret_access_key=$REPO_SECRET endpoint=https://$ACCOUNT.r2.cloudflarestorage.com no_check_bucket=true
+          rclone config create coraosrepo s3 \
+            provider=Cloudflare \
+            access_key_id="$REPO_KEY" \
+            secret_access_key="$REPO_SECRET" \
+            endpoint="https://$ACCOUNT.r2.cloudflarestorage.com" \
+            no_check_bucket=true
 
           mkdir -p CoraOS_Repo
           cp *.pkg.tar.zst* CoraOS_Repo/
