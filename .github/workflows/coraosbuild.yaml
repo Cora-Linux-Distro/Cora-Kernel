@@ -93,7 +93,7 @@ jobs:
           export _hugepage="madvise"
           export _processor_opt="${{ matrix.cpu_target }}"
 
-          MAKEFLAGS="-j$(nproc)" makepkg -s --noconfirm --skipchecksums --sign
+          MAKEFLAGS="-j$(nproc)" makepkg -s --noconfirm --skippgpcheck --skipchecksums --sign
 
       - name: upload artifacts
         uses: actions/upload-artifact@v4
