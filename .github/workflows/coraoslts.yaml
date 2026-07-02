@@ -1,10 +1,10 @@
-name: Build CoraOS Kernels
+name: Build CoraOS Fallback Kernel
 
 on:
   workflow_dispatch:
 
 concurrency:
-  group: build-coraos-kernels
+  group: build-coraos-fallback-kernel
   cancel-in-progress: false
 
 permissions:
@@ -30,16 +30,7 @@ jobs:
         include:
           - kernel_type: generic
             cpu_target: GENERIC
-            package_name: linux-coraos
-          - kernel_type: x86-64-v2
-            cpu_target: GENERIC_V2
-            package_name: linux-coraos-x86-64-v2
-          - kernel_type: x86-64-v3
-            cpu_target: GENERIC_V3
-            package_name: linux-coraos-x86-64-v3
-          - kernel_type: x86-64-v4
-            cpu_target: GENERIC_V4
-            package_name: linux-coraos-x86-64-v4
+            package_name: linux-coraos-fallback
 
     steps:
       - uses: actions/checkout@v4
@@ -55,15 +46,15 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: /ccache
-          key: ccache-${{ matrix.kernel_type }}-${{ github.sha }}
+          key: ccache-fallback-${{ matrix.kernel_type }}-${{ github.sha }}
           restore-keys: |
-            ccache-${{ matrix.kernel_type }}-
+            ccache-fallback-${{ matrix.kernel_type }}-
 
       - name: restore pacman cache
         uses: actions/cache@v4
         with:
           path: /var/cache/pacman/pkg
-          key: pacman-${{ hashFiles('.github/workflows/build-kernels.yml') }}
+          key: pacman-${{ hashFiles('.github/workflows/build-fallback-kernel.yml') }}
           restore-keys: pacman-
 
       - name: install deps
@@ -94,16 +85,16 @@ jobs:
           echo "cache_dir = /ccache" > /home/builder/.ccache/ccache.conf
           chown -R builder:builder /ccache /home/builder/.ccache
 
-      - name: fetch cachyos kernel
+      - name: fetch cachyos lts kernel
         run: |
           git clone --depth=1 https://github.com/CachyOS/linux-cachyos.git upstream
-          cp -r upstream/linux-cachyos/* .
+          cp -r upstream/linux-cachyos-lts/* .
           rm -rf upstream
 
       - name: patch PKGBUILD
         run: |
           sed -i "s/^pkgbase=.*/pkgbase=${{ matrix.package_name }}/" PKGBUILD
-          sed -i 's/^pkgdesc=.*/pkgdesc=CoraOS kernel - BORE with CachyOS patches/' PKGBUILD
+          sed -i 's/^pkgdesc=.*/pkgdesc=CoraOS fallback kernel - BORE with CachyOS LTS patches/' PKGBUILD
           chown -R builder:builder .
 
       - name: import gpg key
@@ -127,11 +118,12 @@ jobs:
         shell: su builder -s /bin/bash {0}
         run: |
           export _cachy_config="yes"
-          export _cpusched="bore"
+          export _cpusched="cachyos"
           export _cc_harder="yes"
+          export _HZ_ticks="750"
           export _tcp_bbr3="yes"
           export _use_kcfi="yes"
-          export _use_llvm_lto="thin"
+          export _use_llvm_lto="none"
           export _hugepage="madvise"
           export _processor_opt="${{ matrix.cpu_target }}"
 
@@ -163,7 +155,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: /ccache
-          key: ccache-${{ matrix.kernel_type }}-${{ github.sha }}
+          key: ccache-fallback-${{ matrix.kernel_type }}-${{ github.sha }}
 
       - name: verify package
         shell: su builder -s /bin/bash {0}
@@ -283,10 +275,10 @@ jobs:
       - name: make the release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: coraos-${{ github.run_number }}-${{ steps.assets.outputs.stamp }}
-          name: CoraOS Kernel Build v${{ github.run_number }}
+          tag_name: coraos-fallback-${{ github.run_number }}-${{ steps.assets.outputs.stamp }}
+          name: CoraOS Fallback Kernel Build v${{ github.run_number }}
           files: release/*
           body: |
-            ## CoraOS Kernel Build v${{ github.run_number }}
+            ## CoraOS Fallback Kernel Build v${{ github.run_number }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
