@@ -67,7 +67,7 @@ jobs:
       - name: setting Name, Version and Description
         run: |
           sed -i "s/^pkgbase=.*/pkgbase=${{ matrix.package_name }}/" PKGBUILD
-          sed -i 's/^pkgdesc=.*/pkgdesc=CoraOS kernel. Applied patches to the CachyOS kernel/' PKGBUILD
+          sed -i 's/^pkgdesc=.*/pkgdesc="CoraOS kernel. Applied patches to the CachyOS kernel"/' PKGBUILD
 
       - name: set perms
         run: |
