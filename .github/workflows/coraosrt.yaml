@@ -1,0 +1,227 @@
+name: Build CoraOS Kernels
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: build-coraos-kernels
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: "Build: ${{ matrix.kernel_type }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    container:
+      image: archlinux:latest
+      options: --security-opt seccomp=unconfined
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kernel_type: generic
+            cpu_target: GENERIC
+            package_name: linux-coraos-rt
+          - kernel_type: x86-64-v2
+            cpu_target: GENERIC_V2
+            package_name: linux-coraos-rt-x86-64-v2
+          - kernel_type: x86-64-v3
+            cpu_target: GENERIC_V3
+            package_name: linux-coraos-rt-x86-64-v3
+          - kernel_type: x86-64-v4
+            cpu_target: GENERIC_V4
+            package_name: linux-coraos-rt-x86-64-v4
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: free disk space
+        run: |
+          rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /usr/local/lib/android /usr/lib/gcc/x86_64-linux-gnu 2>/dev/null || true
+          df -h /
+
+      - name: install deps
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --needed --noconfirm \
+            base-devel git bc kmod libelf pahole cpio perl tar xz zstd \
+            python clang llvm lld fakeroot sudo pacman-contrib gnupg \
+            archlinux-keyring libarchive
+          pacman -Scc --noconfirm
+
+      - name: setup keyring
+        run: |
+          rm -rf /etc/pacman.d/gnupg
+          pacman-key --init
+          pacman-key --populate archlinux
+
+      - name: add builder user
+        run: |
+          useradd -m builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
+          chmod 440 /etc/sudoers.d/builder
+
+      - name: fetch cachyos kernel
+        run: |
+          git clone --depth=1 https://github.com/CachyOS/linux-cachyos.git upstream
+          cp -r upstream/linux-cachyos/* .
+          rm -rf upstream
+
+      - name: patch PKGBUILD
+        run: |
+          sed -i "s/^pkgbase=.*/pkgbase=${{ matrix.package_name }}/" PKGBUILD
+          sed -i 's/^pkgdesc=.*/pkgdesc=CoraOS kernel - RT-BORE with CachyOS patches/' PKGBUILD
+          chown -R builder:builder .
+
+      - name: import gpg key
+        env:
+          GPG_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        shell: su builder -s /bin/bash {0}
+        run: |
+          mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
+          echo -e "allow-loopback-pinentry\nbatch" > ~/.gnupg/gpg-agent.conf
+          gpgconf --kill gpg-agent || true
+
+          echo "$GPG_KEY" | gpg --batch --import
+          FINGERPRINT=$(gpg --list-keys --with-colons | grep '^fpr' | head -1 | cut -d: -f10)
+          echo "${FINGERPRINT}:6:" | gpg --import-ownertrust
+
+          sudo sed -i "s/#GPGKEY=.*/GPGKEY=\"$FINGERPRINT\"/" /etc/makepkg.conf
+
+      - name: build kernel
+        shell: su builder -s /bin/bash {0}
+        run: |
+          export _cachy_config="yes"
+          export _cpusched="rt-bore"
+          export _cc_harder="yes"
+          export _tcp_bbr3="yes"
+          export _use_kcfi="yes"
+          export _use_llvm_lto="thin"
+          export _hugepage="madvise"
+          export _processor_opt="${{ matrix.cpu_target }}"
+
+          # Aggressive but works for now
+          MAKEFLAGS="-j$(nproc)" makepkg -s --noconfirm --skippgpcheck --skipchecksums --sign
+
+      - name: verify package
+        shell: su builder -s /bin/bash {0}
+        run: |
+          expected_pkgbase="${{ matrix.package_name }}"
+          found=0
+          shopt -s nullglob
+          for f in *.pkg.tar.zst; do
+            pkgbase=$(bsdtar -xOf "$f" .PKGINFO | grep -m1 '^pkgbase = ' | cut -d' ' -f3-)
+            if [ "$pkgbase" = "$expected_pkgbase" ]; then
+              found=1
+              if [ ! -f "${f}.sig" ]; then
+                echo "::error::Signature file missing for package: $f" && exit 1
+              fi
+            fi
+          done
+          [ "$found" -eq 1 ] || { echo "::error::Expected package base '$expected_pkgbase' not found!"; exit 1; }
+
+      - name: upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.kernel_type }}
+          path: "*.pkg.tar.zst*"
+          if-no-files-found: error
+          retention-days: 14
+
+  repository:
+    name: publish repo
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: archlinux:latest
+      options: --security-opt seccomp=unconfined
+
+    steps:
+      - name: install tools
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --needed --noconfirm pacman-contrib rclone libarchive
+
+      - name: download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: sync current repo
+        env:
+          REPO_KEY: ${{ secrets.REPO_ACCESS_KEY }}
+          REPO_SECRET: ${{ secrets.REPO_SECRET_ACCESS_KEY }}
+          ACCOUNT: ${{ secrets.ACCOUNT_ID }}
+        run: |
+          rclone config create coraosrepo s3 \
+            provider=Cloudflare \
+            access_key_id="$REPO_KEY" \
+            secret_access_key="$REPO_SECRET" \
+            endpoint="https://$ACCOUNT.r2.cloudflarestorage.com" \
+            no_check_bucket=true
+
+          mkdir -p CoraOS_Repo
+          rclone copy coraosrepo:coraos-repo/x86_64/ CoraOS_Repo/ --verbose --retries 3
+
+      - name: prune old versions
+        run: |
+          cp artifacts/*.pkg.tar.zst* CoraOS_Repo/
+          paccache -r -k 3 -c CoraOS_Repo/ || true
+
+          shopt -s nullglob
+          for sig in CoraOS_Repo/*.pkg.tar.zst.sig; do
+            [ -f "${sig%.sig}" ] || rm -f "$sig"
+          done
+
+      - name: rebuild db
+        run: |
+          cd CoraOS_Repo
+          rm -f coraos.db.tar.gz coraos.db coraos.files.tar.gz coraos.files
+          repo-add coraos.db.tar.gz *.pkg.tar.zst
+
+      - name: push to r2
+        env:
+          REPO_KEY: ${{ secrets.REPO_ACCESS_KEY }}
+          REPO_SECRET: ${{ secrets.REPO_SECRET_ACCESS_KEY }}
+          ACCOUNT: ${{ secrets.ACCOUNT_ID }}
+        run: |
+          rclone copy CoraOS_Repo/ coraosrepo:coraos-repo/x86_64/ \
+            --verbose --retries 5 --retries-sleep 10s --checksum --copy-links
+
+  release:
+    name: create release
+    needs: [build, repository]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: prep assets
+        id: assets
+        run: |
+          mkdir -p release
+          cp artifacts/*.pkg.tar.zst* release/
+          (cd release && sha256sum *.pkg.tar.zst > checksums.txt)
+          echo "stamp=$(date +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+
+      - name: make the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: coraos-${{ github.run_number }}-${{ steps.assets.outputs.stamp }}
+          name: CoraOS Kernel Build v${{ github.run_number }}
+          files: release/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
