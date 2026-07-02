@@ -18,6 +18,11 @@ jobs:
     container:
       image: archlinux:latest
       options: --security-opt seccomp=unconfined
+    env:
+      CCACHE_DIR: /ccache
+      CCACHE_MAXSIZE: 5G
+      CCACHE_COMPRESS: 1
+      CCACHE_DEPEND: 1
 
     strategy:
       fail-fast: false
@@ -41,8 +46,25 @@ jobs:
 
       - name: free disk space
         run: |
-          rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /usr/local/lib/android /usr/lib/gcc/x86_64-linux-gnu 2>/dev/null || true
+          rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost \
+                 /usr/local/lib/android /usr/lib/gcc/x86_64-linux-gnu \
+                 /usr/share/doc /usr/share/man 2>/dev/null || true
           df -h /
+
+      - name: restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: /ccache
+          key: ccache-${{ matrix.kernel_type }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ matrix.kernel_type }}-
+
+      - name: restore pacman cache
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/pacman/pkg
+          key: pacman-${{ hashFiles('.github/workflows/build-kernels.yml') }}
+          restore-keys: pacman-
 
       - name: install deps
         run: |
@@ -50,8 +72,8 @@ jobs:
           pacman -S --needed --noconfirm \
             base-devel git bc kmod libelf pahole cpio perl tar xz zstd \
             python clang llvm lld fakeroot sudo pacman-contrib gnupg \
-            archlinux-keyring libarchive
-          pacman -Scc --noconfirm
+            archlinux-keyring libarchive ccache
+          ccache -z
 
       - name: setup keyring
         run: |
@@ -64,6 +86,13 @@ jobs:
           useradd -m builder
           echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
           chmod 440 /etc/sudoers.d/builder
+
+      - name: configure makepkg
+        run: |
+          sed -i 's|^BUILDENV=.*|BUILDENV=(!distcc color ccache check !sign)|' /etc/makepkg.conf
+          mkdir -p /ccache /home/builder/.ccache
+          echo "cache_dir = /ccache" > /home/builder/.ccache/ccache.conf
+          chown -R builder:builder /ccache /home/builder/.ccache
 
       - name: fetch cachyos kernel
         run: |
@@ -84,6 +113,8 @@ jobs:
         run: |
           mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
           echo -e "allow-loopback-pinentry\nbatch" > ~/.gnupg/gpg-agent.conf
+          echo "auto-key-retrieve" >> ~/.gnupg/gpg.conf
+          echo "keyserver hkps://keyserver.ubuntu.com" >> ~/.gnupg/gpg.conf
           gpgconf --kill gpg-agent || true
 
           echo "$GPG_KEY" | gpg --batch --import
@@ -104,8 +135,35 @@ jobs:
           export _hugepage="madvise"
           export _processor_opt="${{ matrix.cpu_target }}"
 
-          # Aggressive but works for now
-          MAKEFLAGS="-j$(nproc)" makepkg -s --noconfirm --skippgpcheck --skipchecksums --sign
+          for attempt in 1 2 3; do
+            echo "::group::Build attempt $attempt"
+            if MAKEFLAGS="-j$(nproc)" makepkg -s --noconfirm --sign; then
+              echo "::endgroup::"
+              echo "::notice::Build succeeded on attempt $attempt"
+              break
+            fi
+            echo "::endgroup::"
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Build failed after 3 attempts"
+              exit 1
+            fi
+            echo "Attempt $attempt failed, retrying in 15s..."
+            sleep 15
+          done
+
+      - name: ccache stats
+        if: always()
+        run: |
+          echo "::group::ccache statistics"
+          ccache -s || true
+          echo "::endgroup::"
+
+      - name: save ccache
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: /ccache
+          key: ccache-${{ matrix.kernel_type }}-${{ github.sha }}
 
       - name: verify package
         shell: su builder -s /bin/bash {0}
@@ -130,7 +188,7 @@ jobs:
           name: ${{ matrix.kernel_type }}
           path: "*.pkg.tar.zst*"
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 3
 
   repository:
     name: publish repo
@@ -167,7 +225,9 @@ jobs:
             no_check_bucket=true
 
           mkdir -p CoraOS_Repo
-          rclone copy coraosrepo:coraos-repo/x86_64/ CoraOS_Repo/ --verbose --retries 3
+          rclone copy coraosrepo:coraos-repo/x86_64/ CoraOS_Repo/ \
+            --verbose --retries 5 --retries-sleep 10s \
+            --transfers 16 --checkers 8
 
       - name: prune old versions
         run: |
@@ -192,7 +252,10 @@ jobs:
           ACCOUNT: ${{ secrets.ACCOUNT_ID }}
         run: |
           rclone copy CoraOS_Repo/ coraosrepo:coraos-repo/x86_64/ \
-            --verbose --retries 5 --retries-sleep 10s --checksum --copy-links
+            --verbose --retries 5 --retries-sleep 10s \
+            --checksum --copy-links \
+            --transfers 16 --checkers 8 \
+            --low-level-retries 20
 
   release:
     name: create release
@@ -223,5 +286,7 @@ jobs:
           tag_name: coraos-${{ github.run_number }}-${{ steps.assets.outputs.stamp }}
           name: CoraOS Kernel Build v${{ github.run_number }}
           files: release/*
+          body: |
+            ## CoraOS Kernel Build v${{ github.run_number }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
