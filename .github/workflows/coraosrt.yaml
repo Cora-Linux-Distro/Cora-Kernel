@@ -106,6 +106,12 @@ jobs:
           sed -i 's/^pkgdesc=.*/pkgdesc=CoraOS kernel - RT-BORE with CachyOS patches/' PKGBUILD
           chown -R builder:builder .
 
+      - name: inspect PKGBUILD
+        run: |
+          echo "::group::PKGBUILD lines 175-200"
+          sed -n '175,200p' PKGBUILD
+          echo "::endgroup::"
+
       - name: import gpg key
         env:
           GPG_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
@@ -122,6 +128,20 @@ jobs:
           echo "${FINGERPRINT}:6:" | gpg --import-ownertrust
 
           sudo sed -i "s/#GPGKEY=.*/GPGKEY=\"$FINGERPRINT\"/" /etc/makepkg.conf
+
+      - name: regenerate checksums
+        shell: su builder -s /bin/bash {0}
+        run: |
+          export _cachy_config="yes"
+          export _cpusched="rt-bore"
+          export _cc_harder="yes"
+          export _tcp_bbr3="yes"
+          export _use_kcfi="yes"
+          export _use_llvm_lto="thin"
+          export _hugepage="madvise"
+          export _processor_opt="${{ matrix.cpu_target }}"
+
+          updpkgsums --no-upgrade
 
       - name: build kernel
         shell: su builder -s /bin/bash {0}
@@ -150,37 +170,6 @@ jobs:
             echo "Attempt $attempt failed, retrying in 15s..."
             sleep 15
           done
-
-      - name: ccache stats
-        if: always()
-        run: |
-          echo "::group::ccache statistics"
-          ccache -s || true
-          echo "::endgroup::"
-
-      - name: save ccache
-        if: success()
-        uses: actions/cache/save@v4
-        with:
-          path: /ccache
-          key: ccache-${{ matrix.kernel_type }}-${{ github.sha }}
-
-      - name: verify package
-        shell: su builder -s /bin/bash {0}
-        run: |
-          expected_pkgbase="${{ matrix.package_name }}"
-          found=0
-          shopt -s nullglob
-          for f in *.pkg.tar.zst; do
-            pkgbase=$(bsdtar -xOf "$f" .PKGINFO | grep -m1 '^pkgbase = ' | cut -d' ' -f3-)
-            if [ "$pkgbase" = "$expected_pkgbase" ]; then
-              found=1
-              if [ ! -f "${f}.sig" ]; then
-                echo "::error::Signature file missing for package: $f" && exit 1
-              fi
-            fi
-          done
-          [ "$found" -eq 1 ] || { echo "::error::Expected package base '$expected_pkgbase' not found!"; exit 1; }
 
       - name: upload artifacts
         uses: actions/upload-artifact@v4

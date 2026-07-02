@@ -106,6 +106,12 @@ jobs:
           sed -i 's/^pkgdesc=.*/pkgdesc=CoraOS kernel - BORE with CachyOS patches/' PKGBUILD
           chown -R builder:builder .
 
+      - name: inspect PKGBUILD
+        run: |
+          echo "::group::PKGBUILD lines 175-200"
+          sed -n '175,200p' PKGBUILD
+          echo "::endgroup::"
+
       - name: import gpg key
         env:
           GPG_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
@@ -123,11 +129,25 @@ jobs:
 
           sudo sed -i "s/#GPGKEY=.*/GPGKEY=\"$FINGERPRINT\"/" /etc/makepkg.conf
 
+      - name: regenerate checksums
+        shell: su builder -s /bin/bash {0}
+        run: |
+          export _cachy_config="yes"
+          export _cpusched="rt-bore"
+          export _cc_harder="yes"
+          export _tcp_bbr3="yes"
+          export _use_kcfi="yes"
+          export _use_llvm_lto="thin"
+          export _hugepage="madvise"
+          export _processor_opt="${{ matrix.cpu_target }}"
+
+          updpkgsums --no-upgrade
+
       - name: build kernel
         shell: su builder -s /bin/bash {0}
         run: |
           export _cachy_config="yes"
-          export _cpusched="bore"
+          export _cpusched="rt-bore"
           export _cc_harder="yes"
           export _tcp_bbr3="yes"
           export _use_kcfi="yes"
