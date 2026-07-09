@@ -133,7 +133,7 @@ jobs:
         shell: su builder -s /bin/bash {0}
         run: |
           export _cachy_config="yes"
-          export _cpusched="rt-bore"
+          export _cpusched="bore"
           export _cc_harder="yes"
           export _tcp_bbr3="yes"
           export _use_kcfi="yes"
