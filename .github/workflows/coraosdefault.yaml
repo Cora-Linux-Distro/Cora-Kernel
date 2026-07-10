@@ -30,16 +30,16 @@ jobs:
         include:
           - kernel_type: generic
             cpu_target: GENERIC
-            package_name: linux-coraos
+            package_name: linux-coraos-default
           - kernel_type: x86-64-v2
             cpu_target: GENERIC_V2
-            package_name: linux-coraos-x86-64-v2
+            package_name: linux-coraos-default-x86-64-v2
           - kernel_type: x86-64-v3
             cpu_target: GENERIC_V3
-            package_name: linux-coraos-x86-64-v3
+            package_name: linux-coraos-default-x86-64-v3
           - kernel_type: x86-64-v4
             cpu_target: GENERIC_V4
-            package_name: linux-coraos-x86-64-v4
+            package_name: linux-coraos-default-x86-64-v4
 
     steps:
       - uses: actions/checkout@v4
