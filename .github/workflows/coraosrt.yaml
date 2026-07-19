@@ -111,22 +111,32 @@ jobs:
           GPG_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
         shell: su builder -s /bin/bash {0}
         run: |
-          mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
-          echo -e "allow-loopback-pinentry\nbatch" > ~/.gnupg/gpg-agent.conf
-          echo "auto-key-retrieve" >> ~/.gnupg/gpg.conf
-          echo "keyserver hkps://keyserver.ubuntu.com" >> ~/.gnupg/gpg.conf
+          export GNUPGHOME="$HOME/.gnupg"
+          mkdir -p "$GNUPGHOME" && chmod 700 "$GNUPGHOME"
+
+          echo "allow-loopback-pinentry" > "$GNUPGHOME/gpg-agent.conf"
+          echo -e "batch\nyes\npinentry-mode loopback" > "$GNUPGHOME/gpg.conf"
+
           gpgconf --kill gpg-agent || true
 
           echo "$GPG_KEY" | gpg --batch --import
-          FINGERPRINT=$(gpg --list-keys --with-colons | grep '^fpr' | head -1 | cut -d: -f10)
+
+          FINGERPRINT=$(gpg --list-secret-keys --keyid-format LONG | grep -m1 'sec' | awk '{print $2}' | cut -d'/' -f2)
+
           if [ -z "$FINGERPRINT" ]; then
-            echo "::error::GPG key import failed"
+            echo "::error::GPG key import failed or no secret key found"
             exit 1
           fi
-          echo "::notice::Builder key fingerprint: $FINGERPRINT"
-          echo "${FINGERPRINT}:6:" | gpg --import-ownertrust
 
-          sudo sed -i "s|^#*GPGKEY=.*|GPGKEY=\"$FINGERPRINT\"|" /etc/makepkg.conf
+          echo "::notice::Builder key fingerprint: $FINGERPRINT"
+
+          echo -e "5\ny\n" | gpg --command-fd 0 --expert --edit-key "$FINGERPRINT" trust quit
+
+          sudo sed -i -E 's/^#?[[:space:]]*GPGKEY=.*/GPGKEY="'"$FINGERPRINT"'"/' /etc/makepkg.conf
+
+          if ! grep -q "^GPGKEY=" /etc/makepkg.conf; then
+            echo "GPGKEY=\"$FINGERPRINT\"" | sudo tee -a /etc/makepkg.conf
+          fi
 
       - name: build kernel
         shell: su builder -s /bin/bash {0}
@@ -256,7 +266,7 @@ jobs:
 
       - name: sync current repo from R2 to staging
         env:
-          REPO_KEY: ${{ secrets.REPO_ACCESS_KEY }}
+          REPO_KEY: ${{ secrets.REPO_ACCESS_KEY }} #secret
           REPO_SECRET: ${{ secrets.REPO_SECRET_ACCESS_KEY }}
           ACCOUNT: ${{ secrets.ACCOUNT_ID }}
         shell: bash
