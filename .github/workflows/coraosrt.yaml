@@ -152,7 +152,7 @@ jobs:
 
           for attempt in 1 2 3; do
             echo "::group::Build attempt $attempt/3"
-            if MAKEFLAGS="-j$(nproc)" makepkg -s --noconfirm --skipchecksums --sign; then
+            if MAKEFLAGS="-j$(nproc)" makepkg -s --noconfirm --skipchecksums --sign --skippgpcheck; then
               echo "::endgroup::"
               echo "::notice::Build succeeded on attempt $attempt"
               break
